@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools", "wheel", "setuptools-git-versioning"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "http-status-server"
+authors = [
+  {name = "Raymond L. Plante", "email" = "raydangerplante@gmail.com"}
+]
+maintainers = [
+  {name = "Raymond L. Plante", "email" = "raydangerplante@gmail.com"}
+]
+description = "a test server for delivering specific HTTP status responses"
+dynamic = ["version", "dependencies"]
+readme = "README.md"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+keywords = ["HTTP", "HTTP status", "unit testing", "mocking"]
+classifiers = [
+  "Intended Audience :: Developers",
+  "Topic :: Software Development :: Testing",
+  "Topic :: Software Development :: Testing :: Mocking"
+]
+requires-python = ">=3.8"
+
+[project.urls]
+Repository = "https://github.com/RayPlante/http-status-server"
+
+[tool.setuptools.dynamic]
+version = {attr = "http_status_server.__version__"}
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.package-data]
+http_status_server = ["VERSION"]
+
+[tool.setuptools]
+zip-safe = false
+
+[tool.setuptools-git-versioning]
+enabled = true
+version_file = "http_status_server/VERSION"
+
+

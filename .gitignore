@@ -205,3 +205,13 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# editor and development artifacts
+*~
+
+*/.idea**
+.project
+.settings
+_DS_Store
+
+http_status_server/VERSION
