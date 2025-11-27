@@ -39,5 +39,9 @@ zip-safe = false
 [tool.setuptools-git-versioning]
 enabled = true
 version_file = "http_status_server/VERSION"
+count_commits_from_version_file = true
+dev_template = "{tag}.dev{ccount}"
+dirty_template = "{tag}.{branch}{ccount}"
+
 
 
