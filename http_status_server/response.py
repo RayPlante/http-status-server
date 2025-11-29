@@ -3,7 +3,7 @@ module defining main interfaces and implementations for managing responses
 """
 import json, io
 from abc import ABC, abstractmethod, abstractproperty
-from typing import Mapping, List
+from typing import Mapping, List, IO, AnyStr
 from collections import OrderedDict
 from datetime import datetime
 from copy import deepcopy
@@ -13,17 +13,21 @@ from urllib3 import HTTPResponse
 import requests
 from requests.utils import get_encoding_from_headers
 
-GET    = "GET"
-POST   = "POST"
-PUT    = "PUT"
-DELETE = "DELETE"
-OPTIONS= "OPTIONS"
-HEAD   = "HEAD"
-MKCOL  = "MKCOL"
-FIND   = "FIND"
+__all__ = ["Method", "Resource", "SimpleResource"]
 
+File = IO[AnyStr]
 
-class Resource(ABC):
+class Method:
+    GET    = "GET"
+    POST   = "POST"
+    PUT    = "PUT"
+    DELETE = "DELETE"
+    OPTIONS= "OPTIONS"
+    HEAD   = "HEAD"
+    MKCOL  = "MKCOL"
+    FIND   = "FIND"
+
+class Resource(ABC, Method):
     """
     an abstract base class that generates different responses for a particular 
     resource path.
@@ -44,23 +48,40 @@ class Resource(ABC):
         return self._verstr
 
     @abstractmethod
-    def get_response_to(self, method: str, status: int=200, datestr: str=None) -> HTTPResponse:
+    def get_response_to(self, method: str, status: int=200, datestr: str='now') -> HTTPResponse:
         """
         return an HTTP-compliant response, including the header.
-        :param str method:  the desired HTTP method (e.g. "GET")
-        :param int status:  the desired HTTP status code (default: 200)
+        :param str  method:  the desired HTTP method (e.g. "GET")
+        :param int  status:  the desired HTTP status code (default: 200)
+        :param str datestr:  the value to set as the Date header field. If 'now' 
+                             (default), it will be set to the current time; if None,
+                             the Date field will not be included. 
         :return:  a (urllib3) HTTPResponse object corresponding to the inputs 
         """
         raise NotImplementedError()
 
     def get_requests_response_to(self, method: str, status: int = 200,
-                                 datestr: str = None) -> requests.Response:
+                                 datestr: str = 'now') -> requests.Response:
         """
         :param str method:  the desired HTTP method (e.g. "GET")
         :param int status:  the desired HTTP status code (default: 200)
+        :param str datestr:  the value to set as the Date header field. If 'now' 
+                             (default), it will be set to the current time; if None,
+                             the Date field will not be included. 
         :return:  a (urllib3) HTTPResponse object corresponding to the inputs 
         """
         return to_requests_response(self.get_response_to(method, status, datestr))
+
+    def send(self, fp: File, method: str = "GET", status: int = 200, datestr: str = 'now'):
+        """
+        :param file     fp:  an open file-like object to write the response to
+        :param str  method:  the desired HTTP method (e.g. "GET")
+        :param int  status:  the desired HTTP status code (default: 200)
+        :param str datestr:  the value to set as the Date header field. If 'now' 
+                             (default), it will be set to the current time; if None,
+                             the Date field will not be included. 
+        """
+        pass
 
     def respond(self, method: str = "GET", status: int = 200) -> str:
         """
@@ -84,10 +105,12 @@ class InMemoryResource(Resource):
             'json':  self._make_json_body
         }
 
-    def get_response_to(self, method: str, status: int=200, datestr: str=None) -> HTTPResponse:
-        if not datestr:
-            datestr = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S %Z")
-        hdrs = OrderedDict([('Date', datestr)])
+    def get_response_to(self, method: str, status: int=200, datestr: str='now') -> HTTPResponse:
+        hdrs = OrderedDict()
+        if datestr:
+            if datestr.lower() == 'now':
+                datestr = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S %Z")
+            hdrs['Date'] = datestr
         
         hdrs.update(self._data.get('headers', OrderedDict()))
 
