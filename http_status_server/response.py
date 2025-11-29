@@ -63,6 +63,7 @@ class Resource(ABC, Method):
     def get_requests_response_to(self, method: str, status: int = 200,
                                  datestr: str = 'now') -> requests.Response:
         """
+        return an HTTP response of the type returned by the ``requests`` module.
         :param str method:  the desired HTTP method (e.g. "GET")
         :param int status:  the desired HTTP status code (default: 200)
         :param str datestr:  the value to set as the Date header field. If 'now' 
@@ -74,6 +75,12 @@ class Resource(ABC, Method):
 
     def send(self, fp: File, method: str = "GET", status: int = 200, datestr: str = 'now'):
         """
+        Write a fully formatted HTTP response to a given file.
+
+        This function will detect whether the stream is expecting bytes or strings and 
+        write accordingly.  Of course, to be HTTP compliant, the output stream must be a 
+        a byte stream; however, a text stream can be helpful for debugging.
+
         :param file     fp:  an open file-like object to write the response to
         :param str  method:  the desired HTTP method (e.g. "GET")
         :param int  status:  the desired HTTP status code (default: 200)
@@ -81,13 +88,49 @@ class Resource(ABC, Method):
                              (default), it will be set to the current time; if None,
                              the Date field will not be included. 
         """
-        pass
+        send_response(fp, self.get_response_to(method, status, datestr))
 
-    def respond(self, method: str = "GET", status: int = 200) -> str:
+    def respond(self, method: str = "GET", status: int = 200, datestr: str = 'now') -> str:
         """
         return a formatted (newline-delimited) HTTP response
         """
-        pass
+        out = io.StringIO()
+        self.send(out, method, status, datestr)
+        return out.getvalue()
+
+def send_response(fp: File, resp: HTTPResponse):
+    """
+    Write a given response object to file stream as a fully formatted HTTP response.
+
+    This function will detect whether the stream is expecting bytes or strings and 
+    write accordingly.  Of course, to be HTTP compliant, the output stream must be a 
+    a byte stream; however, a text stream can be helpful for debugging.
+    """
+    def no_encode(b):
+        return b
+    def do_encode(s):
+        return s.encode('utf-8')
+    encode = no_encode if isinstance(fp, io.TextIOBase) else do_encode
+    def writeln(b):
+        fp.write(encode(b))
+        fp.write(encode("\r\n"))
+
+    writeln(f"{resp.version_string} {resp.status}")
+    for nm, val in resp.headers.items():
+        if isinstance(val, (list, tuple)):
+            for v in val:
+                writeln(f"{nm}: {v}")
+        else:
+            writeln(f"{nm}: {val}")
+    writeln('')
+
+    data = resp.data
+    if isinstance(fp, io.TextIOBase):
+        enc = get_encoding_from_headers(resp.headers) or 'utf-8'
+        data = data.decode(enc)
+    fp.write(data)
+
+    
 
 class InMemoryResource(Resource):
     """

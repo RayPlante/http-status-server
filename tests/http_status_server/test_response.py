@@ -198,5 +198,34 @@ class TestSimpleResource(unittest.TestCase):
         self.assertEqual(resp.text, '{"a": 1, "b": 2}')
         self.assertEqual(resp.json(), { "a": 1, "b": 2 })
 
+    def test_respond(self):
+        resp = self.res.respond(self.res.GET, 202, "Today")
+        self.assertEqual(resp, _respond_str)
+
+        cfg = { "def": { "def": { "body": bodycfg } } }
+        self.res = SimpleResource(cfg)
+        resp = self.res.respond(self.res.GET, 202, "Today")
+        text = _respond_str + "it's text"
+        self.assertEqual(resp, text)
+
+    def test_send(self):
+        dest = io.BytesIO()
+        self.res.send(dest, self.res.GET, 202, "Today")
+        self.assertEqual(dest.getvalue(), _respond_str.encode('utf-8'))
+
+        cfg = { "def": { "def": { "body": bodycfg } } }
+        self.res = SimpleResource(cfg)
+        dest = io.BytesIO()
+        self.res.send(dest, self.res.GET, 202, "Today")
+        text = _respond_str + "it's text"
+        self.assertEqual(dest.getvalue(), text.encode('utf-8'))
+        
+_respond_str = """HTTP/1.1 202\r
+Date: Today\r
+Server: http-status-server\r
+Content-Type: text/plain\r
+\r
+"""
+
 if __name__ == '__main__':
     unittest.main()
