@@ -11,6 +11,8 @@ purposes of testing service clients.  It supports several execution modes:
   * a command-line tool
   * a Python package (allowing for injection into [mock objects](https://docs.python.org/3/library/unittest.mock.html))
 
+_This project is currently in early development; not all features are complete._
+
 ## Installing
 
 At this time, this package can only be installed from source.
