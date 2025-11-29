@@ -53,6 +53,16 @@ obtain the repository for development, type:
 git clone https://github.com/RayPlante/http-status-server
 ```
 
+The ``main`` branch includes tagged releases; ``dev`` represents the leading edge of
+development.  It should generally keep in working order (passing all tests) but should
+be considered less stable than ``main``.  To develop for an eventual pull request, first
+create a feature branch from ``dev``:
+
+```
+cd http-status-server
+git switch -c feat/myfeature origin/dev
+```
+
 For development, it is recommended that you set up and activate a Python virtual 
 environment (e.g. [venv](https://docs.python.org/3/library/venv.html)).  Once activated,
 you can install the development dependencies:
