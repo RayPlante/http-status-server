@@ -44,13 +44,23 @@ class Resource(ABC):
         return self._verstr
 
     @abstractmethod
-    def get_response_to(self, method: str, status: int = 200) -> HTTPResponse:
+    def get_response_to(self, method: str, status: int=200, datestr: str=None) -> HTTPResponse:
         """
         return an HTTP-compliant response, including the header.
         :param str method:  the desired HTTP method (e.g. "GET")
         :param int status:  the desired HTTP status code (default: 200)
+        :return:  a (urllib3) HTTPResponse object corresponding to the inputs 
         """
         raise NotImplementedError()
+
+    def get_requests_response_to(self, method: str, status: int = 200,
+                                 datestr: str = None) -> requests.Response:
+        """
+        :param str method:  the desired HTTP method (e.g. "GET")
+        :param int status:  the desired HTTP status code (default: 200)
+        :return:  a (urllib3) HTTPResponse object corresponding to the inputs 
+        """
+        return to_requests_response(self.get_response_to(method, status, datestr))
 
     def respond(self, method: str = "GET", status: int = 200) -> str:
         """
@@ -74,7 +84,7 @@ class InMemoryResource(Resource):
             'json':  self._make_json_body
         }
 
-    def get_response_to(self, method: str, status: int = 200, datestr = None) -> HTTPResponse:
+    def get_response_to(self, method: str, status: int=200, datestr: str=None) -> HTTPResponse:
         if not datestr:
             datestr = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S %Z")
         hdrs = OrderedDict([('Date', datestr)])
@@ -93,10 +103,6 @@ class InMemoryResource(Resource):
         hdrs.update(bystat.get('headers', {}))
 
         return self._make_resp(method, status, hdrs, bystat)
-
-    def get_requests_response_to(self, method: str, status: int = 200,
-                                 datestr = None) -> requests.Response:
-        return to_requests_response(self.get_response_to(method, status, datestr))
 
     def _make_resp(self, method: str, status: int, headers: Mapping, respcfg: Mapping):
         stat = Status(status)
