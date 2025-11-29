@@ -29,8 +29,15 @@ class Method:
 
 class Resource(ABC, Method):
     """
-    an abstract base class that generates different responses for a particular 
+    an abstract base class that generates various responses for a particular 
     resource path.
+
+    A ``Resource`` instance is a stand-in for a URL-accessible web resource.  Through
+    its interface, one can retrieve a response for a particular request method and 
+    desired response status.  The response can come in various forms:  a 
+    ``urllib3.HTTPResponse``, a ``requests.Response``, or a raw HTTP message.
+    
+    
     """
 
     def __init__(self, version: int = 1, version_label: str = "HTTP/1.1"):
@@ -60,8 +67,8 @@ class Resource(ABC, Method):
         """
         raise NotImplementedError()
 
-    def get_requests_response_to(self, method: str, status: int = 200,
-                                 datestr: str = 'now') -> requests.Response:
+    def request(self, method: str, status: int = 200,
+                datestr: str = 'now') -> requests.Response:
         """
         return an HTTP response of the type returned by the ``requests`` module.
         :param str method:  the desired HTTP method (e.g. "GET")
@@ -281,4 +288,3 @@ class SimpleResource(InMemoryResource):
             config = _merge_config(config, _simple_config)
 
         super(SimpleResource, self).__init__(config)
-

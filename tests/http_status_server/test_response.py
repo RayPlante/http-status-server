@@ -183,18 +183,18 @@ class TestSimpleResource(unittest.TestCase):
         self.assertEqual(resp.headers.get("Content-Type"), "text/plain")
         self.assertEqual(resp.data, b"Goob!")
 
-    def test_get_requests_response_to(self):
+    def test_request(self):
         cfg = { "def": { "def": { "body": bodycfg } } }
         self.res = SimpleResource(cfg)
         
-        resp = self.res.get_requests_response_to("GET", 200)
+        resp = self.res.request("GET", 200)
         self.assertTrue(isinstance(resp, requests.Response))
         self.assertEqual(resp.content, b"it's text")
         self.assertEqual(resp.text, "it's text")
 
         cfg.setdefault('headers', {})['Content-Type'] = "text/json"
         self.res = SimpleResource(cfg)
-        resp = self.res.get_requests_response_to("GET", 200)
+        resp = self.res.request("GET", 200)
         self.assertEqual(resp.text, '{"a": 1, "b": 2}')
         self.assertEqual(resp.json(), { "a": 1, "b": 2 })
 
