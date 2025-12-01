@@ -1,8 +1,10 @@
 import unittest, json, io
+from collections import ChainMap
+from typing import Mapping
 
 import urllib3, requests
 
-from http_status_server.response import SimpleResource
+from http_status_server.response import SimpleResource, ConfigurableResource
 
 bodycfg = {
     "def": {
@@ -226,6 +228,101 @@ Server: http-status-server\r
 Content-Type: text/plain\r
 \r
 """
+
+class TestConfigurableResource(unittest.TestCase):
+
+    def setUp(self):
+        cfg = {
+            "headers": { "TestResource": "true" }
+        }
+        self.res = ConfigurableResource(cfg)
+
+    def test_ctor(self):
+        self.assertTrue(isinstance(self.res._data, ChainMap))
+        self.assertTrue(isinstance(self.res._data.get("headers"), Mapping))
+        self.assertEqual(self.res._data['headers'].get("TestResource"), "true")
+        self.assertEqual(self.res._data['headers'].get("Server"), "http-status-server")
+        self.assertEqual(self.res._data['headers'].get("Content-Type"), "text/plain")
+
+    def test_get_headers_for(self):
+        self.assertIsNone(self.res._data.maps[0].get("headers"))
+        hdrs = self.res._get_headers_for(None, None)
+        self.assertEqual(hdrs.get("TestResource"), "true")
+        self.assertEqual(hdrs.get("Server"), "http-status-server")
+        self.assertEqual(hdrs.get("Content-Type"), "text/plain")
+        self.assertEqual(self.res._data.maps[0].get("headers"), hdrs)
+
+        self.assertIsNone(self.res._data.maps[0].get("GOOB"))
+        self.assertEqual(self.res._get_headers_for("GOOB", None), {})
+        self.assertEqual(self.res._data.maps[0]["GOOB"].get('headers'), {})
+
+        self.res._data.maps[1].setdefault("GET", {}).setdefault(200, {})['headers'] = {'a':'1'}
+        self.assertEqual(self.res._get_headers_for("GET", 200), {'a':'1'})
+        self.assertEqual(self.res._get_headers_for("GET", 202), {})
+        self.assertEqual(self.res._data.maps[0].get("GET").get(202), {'headers': {}})
+
+    def test_get_bodies_for(self):
+        self.assertIsNone(self.res._data.maps[0].get("def"))
+        bods = self.res._get_bodies_for(None, None)
+
+        self.assertEqual(bods, {})
+        self.assertEqual(self.res._data.maps[0].get("def", {}).get("def"), {"body": {}})
+
+        bods = self.res._get_bodies_for(None, 400)
+        self.assertEqual(bods, {})
+        self.assertEqual(self.res._data.maps[0].get("def",{}).get(400), {"body": {}})
+        
+        bods = self.res._get_bodies_for("GET", None)
+        self.assertEqual(bods, {})
+        self.assertEqual(self.res._data.maps[0].get("GET"), {"def": {"body": {}}})
+        
+        bods = self.res._get_bodies_for("GET", 500)
+        self.assertEqual(bods, {})
+        self.assertEqual(self.res._data.maps[0].get("GET").get(500), {"body": {}})
+
+    def test_set_headers(self):
+        resp = self.res.get_response_to("GET", 200)
+        self.assertEqual(resp.headers.get("Server"), "http-status-server")
+        self.assertEqual(resp.headers.get("Content-Type"), "text/plain")
+        self.assertIsNone(resp.headers.get("X-Test"))
+
+        self.res.set_headers({"Server": "mystery", "X-Test": "red"})
+        self.res.set_header_for("Content-Type", "text/json", status=404)
+        resp = self.res.get_response_to("GET", 200)
+        self.assertEqual(resp.headers.get("Server"), "mystery")
+        self.assertEqual(resp.headers.get("Content-Type"), "text/plain")
+        self.assertEqual(resp.headers.get("X-Test"), "red")
+        resp = self.res.get_response_to("GET", 404)
+        self.assertEqual(resp.headers.get("Server"), "mystery")
+        self.assertEqual(resp.headers.get("Content-Type"), "text/json")
+        self.assertEqual(resp.headers.get("X-Test"), "red")
+
+        self.res.add_header_for("X-Test", ["yellow", "green"])
+        self.res.add_header_for("X-Test", ["yellow", "green"], "POST", 500)
+        self.res.add_header_for("X-Req", "true", "POST")
+        resp = self.res.get_response_to("GET", 200)
+        self.assertEqual(resp.headers.get("Server"), "mystery")
+        self.assertEqual(resp.headers.get("Content-Type"), "text/plain")
+        self.assertEqual(resp.headers.get("X-Test"), "red, yellow, green")
+        resp = self.res.get_response_to("POST", 404)
+        self.assertEqual(resp.headers.get("Server"), "mystery")
+        self.assertEqual(resp.headers.get("Content-Type"), "text/json")
+        self.assertEqual(resp.headers.get("X-Test"), "red, yellow, green")
+        self.assertEqual(resp.headers.get("X-Req"), "true")
+        resp = self.res.get_response_to("POST", 500)
+        self.assertEqual(resp.headers.get("Server"), "mystery")
+        self.assertEqual(resp.headers.get("Content-Type"), "text/plain")
+        self.assertEqual(resp.headers.get("X-Test"), "yellow, green")
+        self.assertEqual(resp.headers.get("X-Req"), "true")
+
+        self.res.reset()
+        resp = self.res.get_response_to("GET", 200)
+        self.assertEqual(resp.headers.get("Server"), "http-status-server")
+        self.assertEqual(resp.headers.get("Content-Type"), "text/plain")
+        self.assertIsNone(resp.headers.get("X-Test"))
+        
+        
+        
 
 if __name__ == '__main__':
     unittest.main()

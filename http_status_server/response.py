@@ -3,13 +3,13 @@ module defining main interfaces and implementations for managing responses
 """
 import json, io
 from abc import ABC, abstractmethod, abstractproperty
-from typing import Mapping, List, IO, AnyStr
-from collections import OrderedDict
+from typing import Mapping, List, IO, AnyStr, Union
+from collections import OrderedDict, ChainMap
 from datetime import datetime
 from copy import deepcopy
 
 from http_status import Status
-from urllib3 import HTTPResponse
+from urllib3 import HTTPResponse, HTTPHeaderDict
 import requests
 from requests.utils import get_encoding_from_headers
 
@@ -172,16 +172,31 @@ class InMemoryResource(Resource):
 
         bystat = bymeth.get(status)
         if not bystat:
+            # first pick up headers from default to method
+            bystat = self._data.get('def', {}).get(status)
+            if bystat:
+                hdrs.update(bystat.get('headers', {}))
+
+            # now pick up headers from default to status
             bystat = bymeth.get('def', {})
         hdrs.update(bystat.get('headers', {}))
 
         return self._make_resp(method, status, hdrs, bystat)
 
     def _make_resp(self, method: str, status: int, headers: Mapping, respcfg: Mapping):
+        # make an HTTPHeaderDict to properly deal with multiple values
+        hdrs = HTTPHeaderDict()
+        for fld, val in headers.items():
+            if isinstance(val, (list, tuple)):
+                for v in val:
+                    hdrs.add(fld, v)
+            else:
+                hdrs.add(fld, val)
+
         stat = Status(status)
         ct = headers.get("Content-Type")
         return HTTPResponse(self._make_body(method, status, respcfg, ct), 
-                            headers, status, self.version, self.version_string, stat.name)
+                            hdrs, status, self.version, self.version_string, stat.name)
 
     def _make_body(self, method, status, respdata, contenttype: str=None):
         if method == "HEAD":
@@ -288,3 +303,290 @@ class SimpleResource(InMemoryResource):
             config = _merge_config(config, _simple_config)
 
         super(SimpleResource, self).__init__(config)
+
+class ConfigurableResource(InMemoryResource):
+    """
+    a Resource whose responses can be configured after instantiation.  
+    """
+
+    def __init__(self, config: Mapping = None):
+        if config is None:
+            config = _simple_config
+        else:
+            config = _merge_config(config, _simple_config)
+        cfg = ChainMap(OrderedDict(), config)
+        super(ConfigurableResource, self).__init__(cfg)
+
+    def set_header_for(self, header_name: str, val: Union[str,List[str]],
+                       method: str = None, status: Union[int,None] = None):
+        """
+        set a header that should be included in particular responses.  If this header 
+        is already set, the new value(s) will replace it until :py:meth:`reset` is called.
+
+        :param str   header_name:  the name of the header item to set
+        :param str|list(str) val:  the value to give the header.  A list of 
+                                   values can be given
+        :param str        method:  the HTTP request method to associate it with;
+                                   it will only be returned when this method is 
+                                   requested.  If not provided, it will be returned 
+                                   for all methods.
+        :param int        status:  the HTTP status to associate it with; it will only
+                                   be returned when requesting a this particular status
+                                   value.  If not provided, it will be returned regardless
+                                   the requested status (see also ``method``)
+        """
+        if isinstance(val, list):
+            if any(not isinstance(v, str) for v in val):
+                raise ValueError("set_header_for: val not a list of str: "+str(val))
+        elif not isinstance(val, str):
+            raise ValueError("set_header_for: val not a str: "+str(val))
+
+        hdrs = self._get_headers_for(method, status)
+        hdrs[header_name] = val
+
+    def _get_headers_for(self, method, status):
+        # this retrieves header nodes for the purpose of setting new headers
+        if method:
+            method = method.upper()
+        if not method and not status:
+            # applies to all methods and statuses
+            out = self._get_cfg_for_upd("headers")
+        elif method and not status:
+            # applies to all status for given method
+            meth = self._get_cfg_for_upd(method)
+            out = meth.setdefault("headers", OrderedDict())
+        else:
+            # status is not None
+            if not method:
+                # applies to default method
+                method = "def"
+            meth = self._get_cfg_for_upd(method)
+            stat = meth.setdefault(status, OrderedDict())
+            out = stat.setdefault("headers", OrderedDict())
+            
+        return out
+
+    def _get_cfg_for_upd(self, key):
+        out = self._data.maps[0].get(key)
+        if not out:
+            out = deepcopy(self._data.maps[1].get(key))
+            if not out:
+                out = OrderedDict()
+            self._data[key] = out
+        return out
+
+    def set_headers_for(self, headers: Mapping[str, Union[str, List[str]]],
+                        method: str = None, status: Union[int, None] = None):
+        """
+        set a header that should be included in particular responses.  If this header 
+        is already set, the new value(s) will replace it until :py:meth:`reset` is called.
+
+        :param dict headers:  the name of the header item to set
+        :param str   method:  the HTTP request method to associate it with;
+                              it will only be returned when this method is 
+                              requested.  If not provided, it will be returned 
+                              for all methods.
+        :param int   status:  the HTTP status to associate it with; it will only
+                              be returned when requesting a this particular status
+                              value.  If not provided, it will be returned regardless
+                              the requested status (see also ``method``)
+        """
+        def _bad_val(name, val):
+            if isinstance(val, list):
+                if any(not isinstance(v, str) for v in val):
+                    return name
+            elif not isinstance(val, str):
+                return name
+            return None
+        bad = [n for n in [_bad_val(nm, v) for nm, v in headers.items()] if n]
+        if bad:
+            raise ValueError("set_headers_for: headers contains fields with bad values: " +
+                             ", ".join(bad))
+
+        hdrs = self._get_headers_for(method, status)
+        hdrs.update(headers)
+
+    def add_header_for(self, header_name: str, val: Union[str,List[str]],
+                       method: str = None, status: Union[int,None] = None):
+        """
+        Add additional values for a particular header item to be returned.  
+
+        This is like :py:meth:`set_header_for` except that it adds additional values 
+        to those already set.  
+
+        :param str   header_name:  the name of the header item to set
+        :param str|list(str) val:  the value (or list of values) to add to the exiting 
+                                   values (if any) for the header item.  
+        :param str        method:  the HTTP request method to associate the header value
+                                   with; they will only be returned when this method is 
+                                   requested.  If not provided, they will be returned 
+                                   for all methods.  
+        :param int        status:  the HTTP status to associate it with; it will only
+                                   be returned when requesting a this particular status
+                                   value.  If not provided, tey will be returned regardless
+                                   the requested status (see also ``method``)
+        """
+        if isinstance(val, list):
+            if any(not isinstance(v, str) for v in val):
+                raise ValueError("set_header_for: val not a list of str: "+str(val))
+        elif not isinstance(val, str):
+            raise ValueError("set_header_for: val not a str: "+str(val))
+
+        hdrs = self._get_headers_for(method, status)
+        if isinstance(hdrs.get(header_name), str):
+            hdrs[header_name] = [ hdrs[header_name] ]
+        hdrs.setdefault(header_name, [])
+        if isinstance(val, str):
+            hdrs[header_name].append(val)
+        else:
+            hdrs[header_name].extend(val)
+
+    def set_header(self, header_name: str, val: Union[str,List[str]]):
+        """
+        set a header item to appear in all responses (regardless of method or requested 
+        status).
+
+        :param str   header_name:  the name of the header item to set
+        :param str|list(str) val:  the value to give the header.  A list of 
+                                   values can be given
+        """
+        self.set_header_for(header_name, val)
+
+    def set_headers(self, headers: Mapping[str, Union[str, List[str]]]):
+        """
+        set a header item to appear in all responses (regardless of method or requested 
+        status).
+
+        :param str   header_name:  the name of the header item to set
+        :param str|list(str) val:  the value to give the header.  A list of 
+                                   values can be given
+        """
+        self.set_headers_for(headers)
+
+    def add_header(self, header_name: str, val: Union[str,List[str]]):
+        """
+        Add additional values for a particular header item to be returned.  
+
+        This is like :py:meth:`add_header_for` except that it will be returned for 
+        all method and status requests.
+
+        :param str   header_name:  the name of the header item to set
+        :param str|list(str) val:  the value (or list of values) to add to the exiting 
+                                   values (if any) for the header item.  
+        """
+        self.add_header_for(header_name, val)
+
+    def set_json_body_for(self, data, method: str=None, status: int=None,
+                          content_types: List[str] = ["def", "application/json"]):
+        """
+        set the data that should be returned as JSON in the response body when requesting a 
+        particular method and status.  
+        
+        :param       data:  JSON-serializable data to return in the body
+        :param str method:  the HTTP request method to associate the header value
+                            with; they will only be returned when this method is 
+                            requested.  If not provided, they will be returned 
+                            for all methods.  
+        :param int status:  the HTTP status to associate it with; it will only
+                            be returned when requesting a this particular status
+                            value.  If not provided, tey will be returned regardless
+                            the requested status (see also ``method``)
+        :param list(str) content_types:  the content type values to associate this 
+                            this with; this body will only be returned when the response
+                            includes a "Content-Type" header whose value matches one
+                            of these values.  Include the special value, "def", to return
+                            this body when there is no "Content-Type" header item or it 
+                            otherwise doesn't match any currently configured ones.  
+        """
+        json.dumps(data)  # may throw ValueError
+        bdata = {"type": "json", "content": data}
+        self._set_body(bdata, method, status, content_types)
+
+    def _set_body(self, bodycfg, method, status, content_types):
+        if isinstance(content_types, str):
+            content_types = [ content_types ]
+
+        bodies = self._get_bodies_for(method, status)
+        for ct in content_types:
+            bodies[ct] = bodycfg
+
+    def _get_bodies_for(self, method: str, status: Union[int,None]):
+        if method and method != "def":
+            method = method.upper()
+        else:
+            method = "def"
+        meth = self._data.get(method, OrderedDict())
+        self._data[method] = meth
+        if not status:
+            status = "def"
+        stat = meth.get(status, OrderedDict())
+        meth[status] = stat
+
+        out = stat.get("body", OrderedDict())
+        stat["body"] = out
+        return out
+
+    def set_text_body_for(self, text: str, method: str=None, status: int=None,
+                          content_types: List[str] = ["text/plain"]):
+        """
+        set the text that should be returned in the response body when requesting a 
+        particular method and status.  
+        
+        :param       data:  JSON-serializable data to return in the body
+        :param str method:  the HTTP request method to associate the header value
+                            with; they will only be returned when this method is 
+                            requested.  If not provided, they will be returned 
+                            for all methods.  
+        :param int status:  the HTTP status to associate it with; it will only
+                            be returned when requesting a this particular status
+                            value.  If not provided, tey will be returned regardless
+                            the requested status (see also ``method``)
+        :param list(str) content_types:  the content type values to associate this 
+                            this with; this body will only be returned when the response
+                            includes a "Content-Type" header whose value matches one
+                            of these values.  Include the special value, "def", to return
+                            this body when there is no "Content-Type" header item or it 
+                            otherwise doesn't match any currently configured ones.  
+        """
+        if not isinstance(data, str):
+            raise ValueError("set_text_body: data: not a str: "+str(data))
+        bdata = {"type": "text", "content": data}
+        self._set_body(bdata, method, status, content_types)
+
+    def set_bytes_body_for(self, data: bytes, method: str=None, status: int=None,
+                           content_types: List[str] = ["application/octet-stream"]):
+        """
+        set the text that should be returned in the response body when requesting a 
+        particular method and status.  
+        
+        :param       data:  JSON-serializable data to return in the body
+        :param str method:  the HTTP request method to associate the header value
+                            with; they will only be returned when this method is 
+                            requested.  If not provided, they will be returned 
+                            for all methods.  
+        :param int status:  the HTTP status to associate it with; it will only
+                            be returned when requesting a this particular status
+                            value.  If not provided, tey will be returned regardless
+                            the requested status (see also ``method``)
+        :param list(str) content_types:  the content type values to associate this 
+                            this with; this body will only be returned when the response
+                            includes a "Content-Type" header whose value matches one
+                            of these values.  Include the special value, "def", to return
+                            this body when there is no "Content-Type" header item or it 
+                            otherwise doesn't match any currently configured ones.  
+        """
+        if not isinstance(data, bytes):
+            raise ValueError("set_text_body: data: not bytes: "+str(data))
+        bdata = {"type": "bytes", "content": data}
+        self._set_body(bdata, method, status, content_types)
+
+    def reset(self):
+        """
+        Revert the behavior configuration back to what it was at construction time.
+        """
+        if hasattr(self._data, 'maps'):
+            self._data.maps[0] = OrderedDict()
+
+    
+        
+        
