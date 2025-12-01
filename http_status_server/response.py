@@ -162,7 +162,7 @@ class InMemoryResource(Resource):
                 datestr = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S %Z")
             hdrs['Date'] = datestr
         
-        hdrs.update(self._data.get('headers', OrderedDict()))
+        hdrs.update(self._data.get('headers', {}))
 
         bymeth = self._data.get(method)
         if not bymeth:
@@ -174,11 +174,17 @@ class InMemoryResource(Resource):
         if not bystat:
             # first pick up headers from default to method
             bystat = self._data.get('def', {}).get(status)
+            if not bystat:
+                bystat = self._data.get('def', {}).get('def')
             if bystat:
                 hdrs.update(bystat.get('headers', {}))
 
             # now pick up headers from default to status
-            bystat = bymeth.get('def', {})
+            if bymeth.get('def'):
+                bystat = bymeth['def']
+            elif bystat is None:
+                bystat = {}
+            
         hdrs.update(bystat.get('headers', {}))
 
         return self._make_resp(method, status, hdrs, bystat)
@@ -477,7 +483,7 @@ class ConfigurableResource(InMemoryResource):
         self.add_header_for(header_name, val)
 
     def set_json_body_for(self, data, method: str=None, status: int=None,
-                          content_types: List[str] = ["def", "application/json"]):
+                          content_types: List[str] = ["application/json"]):
         """
         set the data that should be returned as JSON in the response body when requesting a 
         particular method and status.  
@@ -515,15 +521,13 @@ class ConfigurableResource(InMemoryResource):
             method = method.upper()
         else:
             method = "def"
-        meth = self._data.get(method, OrderedDict())
-        self._data[method] = meth
+
+        meth = self._get_cfg_for_upd(method)
         if not status:
             status = "def"
-        stat = meth.get(status, OrderedDict())
-        meth[status] = stat
+        stat = meth.setdefault(status, OrderedDict())
 
-        out = stat.get("body", OrderedDict())
-        stat["body"] = out
+        out = stat.setdefault("body", OrderedDict())
         return out
 
     def set_text_body_for(self, text: str, method: str=None, status: int=None,
@@ -548,9 +552,9 @@ class ConfigurableResource(InMemoryResource):
                             this body when there is no "Content-Type" header item or it 
                             otherwise doesn't match any currently configured ones.  
         """
-        if not isinstance(data, str):
+        if not isinstance(text, str):
             raise ValueError("set_text_body: data: not a str: "+str(data))
-        bdata = {"type": "text", "content": data}
+        bdata = {"type": "text", "content": text}
         self._set_body(bdata, method, status, content_types)
 
     def set_bytes_body_for(self, data: bytes, method: str=None, status: int=None,
